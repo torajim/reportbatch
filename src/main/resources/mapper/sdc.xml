@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.skplanet.dpa.reportbatch.domain.sdc.repository.SDCMapper">
+    <select id="selectWeeklyResults" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.sdc.repository.WeeklyResult">
+        <![CDATA[
+        /* DLV END count and average time values during last week */
+        SELECT /*+ parallel(A 8) full(A) */
+            FLOOR(to_char(ORD_DT, 'd') / 5) ORD_TYPE
+            , COUNT(DISTINCT CONCAT(ORD_NO, CONCAT('-', ORD_PRD_SEQ))) ORD_CNT
+            , to_char(round(AVG(SEND_END_DT - ORD_DT) * 24 * 100) / 100, 'fm990.00') AVG_ORD2SND_HR
+            , MEDIAN(SEND_END_DT - ORD_DT) * 24 MED_ORD2SND_HR
+            , to_char(round(AVG(DLV_END_DT - ORD_DT) * 24 * 100) / 100, 'fm990.00') AVG_ORD2DLV_HR
+            , MEDIAN(DLV_END_DT - ORD_DT) * 24 MED_ORD2DLV_HR
+            , SUM((CASE WHEN to_date(DLV_END_DT) - to_date(ORD_DT) >= 5 THEN 1 ELSE 0 END)) CNT_ORD2DLV_LATE
+        FROM STTMALL.ST_SDC_ORD_DLV_PREDTN A
+        WHERE 1=1
+            AND DLV_END_DT >= to_date(SYSDATE) - to_char(SYSDATE, 'd') - 5 AND DLV_END_DT < to_date(SYSDATE) - to_char(SYSDATE, 'd') + 2
+        GROUP BY FLOOR(to_char(ORD_DT, 'd') / 5)
+        ]]>
+    </select>
+    <select id="selectOldWeeklyResults" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.sdc.repository.WeeklyResult">
+        <![CDATA[
+        /* DLV END count and average values during the week before last week */
+        SELECT /*+ parallel(A 8) full(A) */
+            FLOOR(to_char(ORD_DT, 'd') / 5) ORD_TYPE
+            , COUNT(DISTINCT CONCAT(ORD_NO, CONCAT('-', ORD_PRD_SEQ))) ORD_CNT
+            , to_char(round(AVG(SEND_END_DT - ORD_DT) * 24 * 100) / 100, 'fm990.00') AVG_ORD2SND_HR
+            , MEDIAN(SEND_END_DT - ORD_DT) * 24 MED_ORD2SND_HR
+            , to_char(round(AVG(DLV_END_DT - ORD_DT) * 24 *100) / 100, 'fm990.00') AVG_ORD2DLV_HR
+            , MEDIAN(DLV_END_DT - ORD_DT) * 24 MED_ORD2DLV_HR
+            , SUM((CASE WHEN to_date(DLV_END_DT) - to_date(ORD_DT) >= 5 THEN 1 ELSE 0 END)) CNT_ORD2DLV_LATE
+        FROM STTMALL.ST_SDC_ORD_DLV_PREDTN A
+        WHERE 1=1
+            AND DLV_END_DT >= to_date(SYSDATE) - to_char(SYSDATE, 'd') - 12 AND DLV_END_DT < to_date(SYSDATE) - to_char(SYSDATE, 'd') - 5
+        GROUP BY FLOOR(to_char(ORD_DT, 'd') / 5)
+        ]]>
+    </select>
+
+    <resultMap id="categoryDlvResult" type="com.skplanet.dpa.reportbatch.domain.sdc.repository.CategoryRow">
+        <result column="seq" property="seq" />
+        <result column="DISP_CTGR1_NM" property="ctgr_nm" />
+        <result column="AVG_ORD2DLV_CTGR" property="avg_dlv_time" />
+        <result column="ord_cnt" property="cnt_dlv" />
+    </resultMap>
+
+    <select id="selectCategoryDlvResults" parameterType="hashmap" resultMap="categoryDlvResult">
+        <![CDATA[
+        /* Elapsed time for dlv_end during last week by categories (level 1) */
+        SELECT /*+ parallel(A 8) full(A) */
+            seq
+            , DISP_CTGR1_NM
+            , round(AVG_ORD2DLV_CTGR * 100) / 100 as AVG_ORD2DLV_CTGR
+            , ord_cnt
+        FROM (
+            SELECT
+                A.*
+                , ROW_NUMBER() OVER(ORDER BY AVG_ORD2DLV_CTGR ASC) AS seq
+                , COUNT(*) OVER () AS CNT
+            FROM (
+                SELECT
+                    DISP_CTGR1_NM
+                    , AVG(DLV_END_DT - ORD_DT) * 24 AVG_ORD2DLV_CTGR
+                    , count(1) as ord_cnt
+                FROM STTMALL.ST_SDC_ORD_DLV_PREDTN A
+                JOIN (
+                    SELECT DISTINCT DISP_CTGR_NO, DISP_CTGR1_NM FROM TMALL.DP_DISP_CTGR_LIST
+                ) B ON (A.DISP_CTGR_NO = B.DISP_CTGR_NO)
+                WHERE 1=1
+                    AND DLV_END_DT >= to_date(SYSDATE) - to_char(SYSDATE, 'd') - 5 AND DLV_END_DT < to_date(SYSDATE) - to_char(SYSDATE, 'd') + 2
+                GROUP BY DISP_CTGR1_NM
+            ) A
+        ) A WHERE seq <= 5 OR seq > CNT - 5
+        ]]>
+    </select>
+
+    <select id="selectOverallPredictionResult" parameterType="hashmap" resultType="java.lang.Float">
+        <![CDATA[
+        /* Overall Prediction Result */
+        SELECT
+            to_char(round((EXACT_CNT + GOOD_CNT) / (EXACT_CNT + GOOD_CNT + BAD_CNT) * 10000) / 100, 'fm990.00') AS result
+        FROM (
+            SELECT /*+ parallel(A 8) full(A) */
+                SUM((CASE WHEN to_date(PREDTN_DLV_END_DT2) = to_date(DLV_END_DT) THEN 1 ELSE 0 END)) EXACT_CNT
+                , SUM((CASE WHEN to_date(PREDTN_DLV_END_DT2) > to_date(DLV_END_DT) THEN 1 ELSE 0 END)) GOOD_CNT
+                , SUM((CASE WHEN to_date(PREDTN_DLV_END_DT2) < to_date(DLV_END_DT) THEN 1 ELSE 0 END)) BAD_CNT
+            FROM STTMALL.ST_SDC_ORD_DLV_PREDTN A
+            WHERE 1=1
+                AND DLV_END_DT >= to_date(SYSDATE) - to_char(SYSDATE, 'd') - 5 AND DLV_END_DT < to_date(SYSDATE) - to_char(SYSDATE, 'd') + 2
+                AND PRD_NO IN (
+                    SELECT PRD_NO
+                    FROM STTMALL.ST_SDC_PRD_PREDTN_STATS
+                    WHERE CREATE_WKDY_NO = TO_CHAR(SYSDATE, 'd') AND (PREDTN_SUCC_CNT + PREDTN_FAIL_CNT) >= 3 AND (PREDTN_SUCC_CNT / (PREDTN_SUCC_CNT + PREDTN_FAIL_CNT)) > 0.7
+                )
+        ) B
+        ]]>
+    </select>
+
+    <select id="selectPredictionResultsByDate" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.sdc.repository.PredictionByDate">
+        <![CDATA[
+        /* Prediction Result By Date */
+        SELECT /*+ parallel(A 8) full(A) */
+           to_char(to_date(DLV_END_DT), 'yyyy-MM-dd') DLV_END_DT
+           , SUM((CASE WHEN to_date(PREDTN_DLV_END_DT2) = to_date(DLV_END_DT) THEN 1 ELSE 0 END)) EXACT_CNT
+           , SUM((CASE WHEN to_date(PREDTN_DLV_END_DT2) > to_date(DLV_END_DT) THEN 1 ELSE 0 END)) EARLY_CNT
+           , SUM((CASE WHEN to_date(PREDTN_DLV_END_DT2) < to_date(DLV_END_DT) THEN 1 ELSE 0 END)) LATE_CNT
+        FROM STTMALL.ST_SDC_ORD_DLV_PREDTN A
+        WHERE 1=1
+           AND DLV_END_DT >= to_date(SYSDATE) - to_char(SYSDATE, 'd') - 5 AND DLV_END_DT < to_date(SYSDATE) - to_char(SYSDATE, 'd') + 2
+           AND PRD_NO IN (SELECT PRD_NO FROM STTMALL.ST_SDC_PRD_PREDTN_STATS
+               WHERE CREATE_WKDY_NO = TO_CHAR(SYSDATE, 'd') AND (PREDTN_SUCC_CNT + PREDTN_FAIL_CNT) >= 3 AND (PREDTN_SUCC_CNT / (PREDTN_SUCC_CNT + PREDTN_FAIL_CNT)) > 0.7)
+        GROUP BY to_date(DLV_END_DT)
+        ORDER BY to_date(DLV_END_DT)
+        ]]>
+    </select>
+
+    <resultMap id="categoryPredResult" type="com.skplanet.dpa.reportbatch.domain.sdc.repository.CategoryRow">
+        <result column="seq" property="seq" />
+        <result column="DISP_CTGR1_NM" property="ctgr_nm" />
+        <result column="ACCURACY" property="avg_dlv_time" />
+        <result column="ord_cnt" property="cnt_dlv" />
+    </resultMap>
+
+    <select id="selectPredictionResultsByCategory" parameterType="hashmap" resultMap="categoryPredResult">
+        <![CDATA[
+        /* Prediction Result By Category */
+        SELECT /*+ parallel(A 8) full(A) */
+           seq
+           , DISP_CTGR1_NM
+           , to_char(round(ACCURACY * 10000) / 100, 'fm990.00') as ACCURACY
+           , ord_cnt
+        FROM (
+           SELECT
+               A.*
+               , ROW_NUMBER() OVER(ORDER BY ACCURACY DESC) AS seq
+               , COUNT(*) OVER () AS CNT
+           FROM (
+               SELECT
+                   DISP_CTGR1_NM
+                   , SUM((CASE WHEN to_date(PREDTN_DLV_END_DT2) >= to_date(DLV_END_DT) THEN 1 ELSE 0 END)) / COUNT(*) ACCURACY
+                   , count(1) as ord_cnt
+               FROM (
+                SELECT
+                   *
+                FROM STTMALL.ST_SDC_ORD_DLV_PREDTN
+                WHERE 1=1
+                   AND DLV_END_DT >= to_date(SYSDATE) - to_char(SYSDATE, 'd') - 5 AND DLV_END_DT < to_date(SYSDATE) - to_char(SYSDATE, 'd') + 2
+                   AND PRD_NO IN (SELECT PRD_NO FROM STTMALL.ST_SDC_PRD_PREDTN_STATS
+                       WHERE CREATE_WKDY_NO = TO_CHAR(SYSDATE, 'd') AND (PREDTN_SUCC_CNT + PREDTN_FAIL_CNT) >= 3 AND (PREDTN_SUCC_CNT / (PREDTN_SUCC_CNT + PREDTN_FAIL_CNT)) > 0.7)
+               ) A JOIN (
+                   SELECT DISTINCT DISP_CTGR_NO, DISP_CTGR1_NM FROM TMALL.DP_DISP_CTGR_LIST
+               ) B ON (A.DISP_CTGR_NO = B.DISP_CTGR_NO)
+                GROUP BY DISP_CTGR1_NM
+           ) A
+        ) A WHERE seq <= 5 OR seq > CNT - 5
+        ]]>
+    </select>
+
+    <resultMap id="regionPredResult" type="com.skplanet.dpa.reportbatch.domain.sdc.repository.CategoryRow">
+        <result column="seq" property="seq" />
+        <result column="REGION" property="ctgr_nm" />
+        <result column="ACCURACY" property="avg_dlv_time" />
+        <result column="ord_cnt" property="cnt_dlv" />
+    </resultMap>
+
+    <select id="selectPredictionResultsByRegion" parameterType="hashmap" resultMap="regionPredResult">
+        <![CDATA[
+        /* Prediction Result By Region */
+        SELECT /*+ parallel(A 8) full(A) */
+           seq
+           , SIDO || ' ' || SIGUNGU as REGION
+           , to_char(round(ACCURACY * 10000) / 100, 'fm990.00') as ACCURACY
+           , ord_cnt
+        FROM (
+           SELECT
+               A.*
+               , ROW_NUMBER() OVER(ORDER BY ACCURACY DESC) AS seq
+               , COUNT(*) OVER () AS CNT
+           FROM (
+               SELECT
+                   SIDO, SIGUNGU
+                   , SUM((CASE WHEN to_date(PREDTN_DLV_END_DT2) >= to_date(DLV_END_DT) THEN 1 ELSE 0 END)) / COUNT(*) ACCURACY
+                   , count(1) as ord_cnt
+               FROM (
+                SELECT
+                   *
+                FROM STTMALL.ST_SDC_ORD_DLV_PREDTN
+                WHERE 1=1
+                   AND DLV_END_DT >= to_date(SYSDATE) - to_char(SYSDATE, 'd') - 5 AND DLV_END_DT < to_date(SYSDATE) - to_char(SYSDATE, 'd') + 2
+                   AND PRD_NO IN (SELECT PRD_NO FROM STTMALL.ST_SDC_PRD_PREDTN_STATS
+                       WHERE CREATE_WKDY_NO = TO_CHAR(SYSDATE, 'd') AND (PREDTN_SUCC_CNT + PREDTN_FAIL_CNT) >= 3 AND (PREDTN_SUCC_CNT / (PREDTN_SUCC_CNT + PREDTN_FAIL_CNT)) > 0.7)
+               ) A JOIN STTMALL.MAIL_NO_LST B ON (A.RCVR_MAIL_NO = B.RCVR_MAIL_NO)
+                GROUP BY SIDO, SIGUNGU
+           ) A
+        ) A WHERE seq <= 5 OR seq > CNT - 5
+        ]]>
+    </select>
+</mapper>

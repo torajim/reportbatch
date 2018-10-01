@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.skplanet.dpa.reportbatch.domain.dex.repository.DexMapper">
+    <select id="selectDailyQaReport" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.dex.repository.DailyQaReport">
+        <![CDATA[
+        select
+            A.BASE_DT as baseDt
+            ,A.TOTAL as total
+            ,A.IMPRESSION as impression
+            ,A.NOT_IMPRESSION as notImpression
+            ,A.IMPRESSION_HEALTHY as impressionHealthy
+            ,A.IMPRESSION_MAYBE_HEALTHY as impressionMaybeHealthy
+            ,A.IMPRESSION_UNHEALTHY as impressionUnhealthy
+            ,A.NOT_IMPRESSION_HEALTHY as notImpressionHealthy
+            ,A.NOT_IMPRESSION_MAYBE_HEALTHY as notImpressionMaybeHealthy
+            ,A.NOT_IMPRESSION_UNHEALTHY as notImpressionUnhealthy
+            ,(case when total = 0 then 0 else (not_impression_unhealthy + impression_unhealthy) / total * 100 end) as unhealthyRate
+            ,(case when total = 0 then 0 else impression_unhealthy / total * 100 end) as impressionUnhealthyRate
+            ,(case when total = 0 then 0 else not_impression_unhealthy / total * 100 end) as notImpressionUnhealthyRate
+        from HDFSUSER.QA_REPORT_BASIC A where base_dt = to_char(sysdate+#{addDayVal}, 'YYYYMMDD')
+        ]]>
+    </select>
+</mapper>

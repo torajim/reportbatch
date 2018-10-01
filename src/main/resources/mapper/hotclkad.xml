@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.skplanet.dpa.reportbatch.domain.hotclkad.repository.HotClkAdMapper">
+    <select id="selectCtrRps" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.hotclkad.repository.CtrRps">
+        <![CDATA[
+        select
+            0.045525433 as oldctr
+            ,0.047318358 as v1ctr
+            ,ctr as v2ctr
+            ,88.23842112 as oldrps
+            ,87.8188333 as v1rps
+            ,rps as v2rps
+        from
+            HDFSUSER.MART_VINE_AD_CLICK_LOG_V2
+        where
+            part_dt = to_char(sysdate+#{addDayVal}, 'YYYYMMDD')
+        ]]>
+    </select>
+</mapper>

@@ -1,0 +1,21 @@
+server:
+  port: 8080
+
+spring:
+  profiles:
+    active: local
+
+  application:
+    name: reportbatch
+
+  mvc:
+    throw-exception-if-no-handler-found: true
+
+# Datasource Configuration 에서 설정
+#mybatis:
+#  mapper-locations: classpath:mapper/*
+#  type-aliases-package: com.skplanet.dpa.reportbatch.domain
+
+logging:
+  config:
+    classpath: logback-spring.xml

@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.skplanet.dpa.reportbatch.domain.dmfc.repository.DmfcMapper">
+    <select id="selectOverallWape" resultType="com.skplanet.dpa.reportbatch.domain.dmfc.repository.OverallWape">
+        <![CDATA[
+        WITH BASE AS (
+            SELECT
+                A.STCK_NO AS BASE_STCK_NO
+                , B.STCK_NO AS ORD_STCK_NO
+                , B.ORD_QTY AS ORD_QTY
+                , C.STCK_NO AS PREDTN_STCK_NO
+                , C.PREDTN_QTY AS PREDTN_QTY
+            FROM (
+                SELECT /*+ PARALLEL(A 8) PARALLEL(B 8) */
+                    A.STCK_NO
+                FROM
+                    STTMALL.ST_DMFC_DD_STCK A
+                    , TMALL.DP_LIVE_PRD B
+                WHERE A.BASI_DT = TRUNC(SYSDATE - 7)
+                    AND A.PRD_NO = B.PRD_NO
+                    AND B.SEL_STAT_CD IN ('103', '104')
+                GROUP BY A.STCK_NO
+                HAVING COUNT(DISTINCT CENTER_CD) = 1
+            ) A
+            LEFT OUTER JOIN
+            (
+                SELECT
+                    COMP_STCK_NO AS STCK_NO, SUM(UNTGDS_ORD_SUM_QTY) AS ORD_QTY
+                FROM STTMALL.ST_DMFC_UNTGDS_ORD_STATS A, TMALL.DP_LIVE_PRD B
+                WHERE BASI_DT BETWEEN TO_DATE(SYSDATE - 7) AND TO_DATE(SYSDATE - 1)
+                    AND A.COMP_PRD_NO = B.PRD_NO
+                    AND B.SEL_STAT_CD IN ('103', '104')
+                GROUP BY COMP_STCK_NO
+            ) B ON A.STCK_NO = B.STCK_NO
+            LEFT OUTER JOIN
+            (
+                SELECT /*+ PARALLEL(A 8) PARALLEL(B 8) */
+                    STCK_NO, SUM(PREDTN_QTY) AS PREDTN_QTY
+                FROM STTMALL.ST_DMFC_ALG_DD_STATS A, TMALL.DP_LIVE_PRD B
+                WHERE BASI_DT = TO_DATE(SYSDATE - 7)
+                    AND PREDTN_OBJ_DT BETWEEN TO_DATE(SYSDATE - 7) AND TO_DATE(SYSDATE - 1)
+                    AND SLCT_YN = 'Y'
+                    AND A.PRD_NO = B.PRD_NO
+                    AND B.SEL_STAT_CD IN ('103', '104')
+                GROUP BY STCK_NO
+                HAVING SUM(PREDTN_QTY) > 0
+            ) C ON A.STCK_NO = C.STCK_NO
+        )
+        SELECT
+            0 AS resultType
+            , COUNT(DISTINCT BASE_STCK_NO) as stckCnt -- DMFC_1.1
+            , SUM(ORD_QTY) as realOrdQty -- DMFC_1.2
+            , SUM(PREDTN_QTY) as predOrdQty -- DMFC_1.3
+            , SUM(ABS(NVL(PREDTN_QTY, 0) - NVL(ORD_QTY, 0))) / SUM(ORD_QTY) as wape -- DMFC_1.4
+        FROM BASE
+        UNION ALL
+        SELECT
+            1
+            , COUNT(DISTINCT BASE_STCK_NO) as stckCnt -- DMFC_2.1
+            , SUM(ORD_QTY) as realOrdQty  -- DMFC_2.2
+            , SUM(PREDTN_QTY) as predOrdQty -- DFMC_2.3
+            , SUM(ABS(NVL(PREDTN_QTY, 0) - NVL(ORD_QTY, 0))) / SUM(ORD_QTY) as wape -- DMFC_2.4
+        FROM BASE
+        WHERE (ORD_QTY IS NULL AND PREDTN_QTY IS NOT NULL) OR ORD_QTY < PREDTN_QTY
+        UNION ALL
+        SELECT
+            2
+            , COUNT(DISTINCT BASE_STCK_NO) as stckCnt -- DMFC_3.1
+            , SUM(ORD_QTY) as realOrdQty  -- DMFC_3.2
+            , SUM(PREDTN_QTY) as predOrdQty -- DMFC_3.3
+            , SUM(ABS(NVL(PREDTN_QTY, 0) - NVL(ORD_QTY, 0))) / SUM(ORD_QTY) as wape -- DMFC_3.4
+        FROM BASE
+        WHERE PREDTN_QTY IS NULL OR ORD_QTY >= PREDTN_QTY
+        ]]>
+    </select>
+    <select id="selectPredModelWape" resultType="com.skplanet.dpa.reportbatch.domain.dmfc.repository.WapeByPredModel">
+        <![CDATA[
+        WITH BASE AS (
+            SELECT
+                A.STCK_NO AS BASE_STCK_NO
+                , B.STCK_NO AS ORD_STCK_NO
+                , B.ORD_QTY
+                , C.STCK_NO AS PREDTN_STCK_NO
+                , NVL(C.PREDTN_ALG_CLF_CD, '00001') AS PREDTN_ALG_CLF_CD
+                , NVL(C.PREDTN_QTY, 0) AS PREDTN_QTY
+            FROM (
+                SELECT /*+ PARALLEL(A 8) PARALLEL(B 8) */
+                    A.STCK_NO
+                FROM
+                    STTMALL.ST_DMFC_DD_STCK A
+                    , TMALL.DP_LIVE_PRD B
+                WHERE A.BASI_DT = TRUNC(SYSDATE - 7)
+                    AND A.PRD_NO = B.PRD_NO
+                    AND B.SEL_STAT_CD IN ('103', '104')
+                GROUP BY A.STCK_NO
+                HAVING COUNT(DISTINCT CENTER_CD) = 1
+            ) A
+            LEFT OUTER JOIN
+            (
+                SELECT
+                    COMP_STCK_NO AS STCK_NO, SUM(UNTGDS_ORD_SUM_QTY) AS ORD_QTY
+                FROM STTMALL.ST_DMFC_UNTGDS_ORD_STATS A, TMALL.DP_LIVE_PRD B
+                WHERE BASI_DT BETWEEN TO_DATE(SYSDATE - 7) AND TO_DATE(SYSDATE - 1)
+                    AND A.COMP_PRD_NO = B.PRD_NO
+                    AND B.SEL_STAT_CD IN ('103', '104')
+                GROUP BY COMP_STCK_NO
+            ) B ON A.STCK_NO = B.STCK_NO
+            LEFT OUTER JOIN
+            (
+                SELECT
+                    STCK_NO, PREDTN_ALG_CLF_CD
+                    , GREATEST(SUM(PREDTN_QTY), 0) AS PREDTN_QTY
+                FROM STTMALL.ST_DMFC_ALG_DD_STATS A, TMALL.DP_LIVE_PRD B
+                WHERE BASI_DT = to_date(sysdate - 7)
+                    AND PREDTN_OBJ_DT BETWEEN to_date(sysdate - 7) AND to_date(sysdate - 1)
+                    AND SLCT_YN = 'Y'
+                    AND A.PRD_NO = B.PRD_NO
+                    AND B.SEL_STAT_CD IN ('103', '104')
+                GROUP BY STCK_NO, PREDTN_ALG_CLF_CD
+             ) C ON A.STCK_NO = C.STCK_NO
+         )
+        SELECT
+            PREDTN_ALG_CLF_CD AS predAlgClfCd
+            , 'Moving Average' AS algName
+            , COUNT(DISTINCT BASE_STCK_NO) as stckCnt -- DMFC_4.1
+            , SUM(ORD_QTY) as realOrdQty -- DMFC_4.2
+            , SUM(PREDTN_QTY) as predOrdQty -- DMFC_4.3
+            , SUM(ABS(NVL(PREDTN_QTY, 0) - NVL(ORD_QTY, 0))) / SUM(ORD_QTY) as wape -- DMFC_4.4
+        FROM BASE
+        WHERE PREDTN_ALG_CLF_CD = '00001'
+        GROUP BY PREDTN_ALG_CLF_CD
+        UNION ALL
+        SELECT
+            PREDTN_ALG_CLF_CD AS predAlgClfCd
+            , 'ARIMA' AS algName
+            , COUNT(DISTINCT BASE_STCK_NO) as stckCnt -- DMFC_5.1
+            , SUM(ORD_QTY) as realOrdQty -- DMFC_5.2
+            , SUM(PREDTN_QTY) as predOrdQty -- DMFC_5.3
+            , SUM(ABS(NVL(PREDTN_QTY, 0) - NVL(ORD_QTY, 0))) / SUM(ORD_QTY) as wape -- DMFC_5.4
+        FROM BASE
+        WHERE PREDTN_ALG_CLF_CD = '00002'
+        GROUP BY PREDTN_ALG_CLF_CD
+        ]]>
+    </select>
+    <select id="selectProductWape" resultType="com.skplanet.dpa.reportbatch.domain.dmfc.repository.WapeByProduct">
+        <![CDATA[
+        WITH BASE AS (
+            SELECT
+                A.STCK_NO AS BASE_STCK_NO
+                , A.PRD_NO AS BASE_PRD_NO
+                , B.STCK_NO AS ORD_STCK_NO
+                , NVL(B.ORD_QTY, 0) AS ORD_QTY
+                , C.STCK_NO AS PREDTN_STCK_NO
+                , C.PREDTN_QTY AS PREDTN_QTY
+                , ROUND(ABS(ROUND(NVL(PREDTN_QTY, 0)) - NVL(ORD_QTY, 1)) / NVL(ORD_QTY, 1), 4) AS ERROR_RATE
+            FROM (
+                SELECT /*+ PARALLEL(A 8) PARALLEL(B 8) */
+                    A.STCK_NO, A.PRD_NO
+                FROM
+                    STTMALL.ST_DMFC_DD_STCK A
+                    , TMALL.DP_LIVE_PRD B
+                WHERE A.BASI_DT = TRUNC(SYSDATE - 7)
+                    AND A.PRD_NO = B.PRD_NO
+                    AND B.SEL_STAT_CD IN ('103', '104')
+                GROUP BY A.STCK_NO, A.PRD_NO
+                HAVING COUNT(DISTINCT CENTER_CD) = 1
+            ) A
+            LEFT OUTER JOIN
+            (
+                SELECT
+                    COMP_STCK_NO AS STCK_NO, SUM(UNTGDS_ORD_SUM_QTY) AS ORD_QTY
+                FROM STTMALL.ST_DMFC_UNTGDS_ORD_STATS A, TMALL.DP_LIVE_PRD B
+                WHERE BASI_DT BETWEEN TO_DATE(SYSDATE - 7) AND TO_DATE(SYSDATE - 1)
+                    AND A.COMP_PRD_NO = B.PRD_NO
+                    AND B.SEL_STAT_CD IN ('103', '104')
+                GROUP BY COMP_STCK_NO
+            ) B ON A.STCK_NO = B.STCK_NO
+            LEFT OUTER JOIN
+            (
+                SELECT
+                    STCK_NO, SUM(PREDTN_QTY) AS PREDTN_QTY
+                FROM STTMALL.ST_DMFC_ALG_DD_STATS A, TMALL.DP_LIVE_PRD B
+                WHERE BASI_DT = TO_DATE(SYSDATE - 7)
+                    AND PREDTN_OBJ_DT BETWEEN TO_DATE(SYSDATE - 7) AND TO_DATE(SYSDATE - 1)
+                    AND SLCT_YN = 'Y'
+                    AND A.PRD_NO = B.PRD_NO
+                    AND B.SEL_STAT_CD IN ('103', '104')
+                GROUP BY STCK_NO
+                HAVING SUM(PREDTN_QTY) > 0
+            ) C ON A.STCK_NO = C.STCK_NO
+            WHERE
+                (ORD_QTY IS NOT NULL AND ORD_QTY >= 100)
+                OR (ORD_QTY IS NULL AND PREDTN_QTY >= 100)
+        )
+        SELECT
+            B.ASC_RANK as asc_rank
+            , B.DESC_RANK as desc_rank
+            , B.BASE_PRD_NO as prd_no
+            , B.BASE_STCK_NO as stck_no
+            , PRD.PRD_NM as prd_nm
+            , B.ORD_QTY as ord_qty
+            , B.PREDTN_QTY as predtn_qty
+            , B.ERROR_RATE as error_ratio
+        FROM (
+            SELECT
+                BASE.*
+                , rank() over (ORDER BY ERROR_RATE ASC, ORD_QTY DESC, PREDTN_QTY DESC) AS ASC_RANK
+                , rank() over (ORDER BY ERROR_RATE DESC, ORD_QTY ASC, PREDTN_QTY ASC) AS DESC_RANK
+            FROM BASE
+        ) B LEFT OUTER JOIN TMALL.PD_PRD PRD
+        ON B.BASE_PRD_NO = PRD.PRD_NO
+        WHERE ASC_RANK <= 5 OR DESC_RANK <= 5 ORDER BY ASC_RANK
+        ]]>
+    </select>
+</mapper>

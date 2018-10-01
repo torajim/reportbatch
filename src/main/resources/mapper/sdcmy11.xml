@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.skplanet.dpa.reportbatch.domain.sdc.repository.SDCMy11Mapper">
+    <select id="selectMy11MonthlyAccuracy" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.sdc.repository.My11MonthlyAccuracy">
+        <![CDATA[
+        with BASE as(select /*+ parallel(8) */
+            sum(case when trunc(b.dlv_end_dt) < trunc(a.send_af_predtn_end_dt) then 1 else 0 end) as early
+            ,sum(case when trunc(b.dlv_end_dt) = trunc(a.send_af_predtn_end_dt) then 1 else 0 end) as exact
+            ,sum(case when trunc(b.dlv_end_dt) > trunc(a.send_af_predtn_end_dt) then 1 else 0 end) as late
+        from tmall.tr_dlv_predtn_info a,
+            (select dlv_no, dlv_end_dt from STTMALL.ST_ORD_PRD_DLV_SUM
+                where 1=1
+                    and DLV_END_DT >= trunc(add_months((last_day(add_months(sysdate, #{addMonVal})))+1, -1))
+                    and DLV_END_DT <= trunc(last_day(add_months(sysdate, #{addMonVal})))
+            ) b
+        where 1=1
+            and a.dlv_no = b.dlv_no
+            and a.send_af_predtn_rlablty_nval >= 80
+        )
+        select
+            to_char(trunc(add_months((last_day(add_months(sysdate, #{addMonVal})))+1, -1)), 'YYYY-MM-DD') as fromdate
+            ,to_char(trunc(last_day(add_months(sysdate, #{addMonVal}))), 'YYYY-MM-DD') as todate
+            ,total
+            ,predictable
+            ,early
+            ,exact
+            ,late
+            ,predictable/total*100 as coverage
+            ,precision
+        from(
+        select
+            early
+            ,exact
+            ,late
+            ,early+exact+late as predictable
+            ,(select count(distinct dlv_no) from STTMALL.ST_ORD_PRD_DLV_SUM
+                where 1=1
+                    and DLV_END_DT >= trunc(add_months((last_day(add_months(sysdate, #{addMonVal})))+1, -1))
+                    and DLV_END_DT <= trunc(last_day(add_months(sysdate, #{addMonVal})))
+              ) as total
+            ,(early+exact)/(early+exact+late)*100 as precision
+        from BASE A
+        )
+        ]]>
+    </select>
+    <select id="selectMy11MonthlyProductCoverage" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.sdc.repository.My11MonthlyProductCoverage">
+        <![CDATA[
+        with BASE as(select /*+ parallel(8) */
+            count(distinct b.prd_no) as prd_pred
+        from tmall.tr_dlv_predtn_info a,
+            (select dlv_no, prd_no, dlv_end_dt from STTMALL.ST_ORD_PRD_DLV_SUM
+                where 1=1
+                    and DLV_END_DT >= trunc(add_months((last_day(add_months(sysdate, #{addMonVal})))+1, -1))
+                    and DLV_END_DT <= trunc(last_day(add_months(sysdate, #{addMonVal})))
+            ) b
+        where 1=1
+            and a.dlv_no = b.dlv_no
+            and a.send_af_predtn_rlablty_nval >= 80
+        )
+        select
+            to_char(trunc(add_months((last_day(add_months(sysdate, #{addMonVal})))+1, -1)), 'YYYY-MM-DD') as fromdate
+            ,to_char(trunc(last_day(add_months(sysdate, #{addMonVal}))), 'YYYY-MM-DD') as todate
+            ,prd_total as prdTotal
+            ,prd_pred as prdPred
+            ,prd_pred/prd_total*100 as coverage
+        from(
+        select
+            prd_pred
+            ,(select count(distinct prd_no) from STTMALL.ST_ORD_PRD_DLV_SUM
+                where 1=1
+                    and DLV_END_DT >= trunc(add_months((last_day(add_months(sysdate, #{addMonVal})))+1, -1))
+                    and DLV_END_DT <= trunc(last_day(add_months(sysdate, #{addMonVal})))
+             ) as prd_total
+        from BASE A
+        )
+        ]]>
+    </select>
+    <select id="selectMy11WeeklyAccuracy" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.sdc.repository.My11WeeklyAccuracy">
+        <![CDATA[
+        with BASE as(select /*+ parallel(8) */
+            sum(case when trunc(b.dlv_end_dt) < trunc(a.send_af_predtn_end_dt) then 1 else 0 end) as early
+            ,sum(case when trunc(b.dlv_end_dt) = trunc(a.send_af_predtn_end_dt) then 1 else 0 end) as exact
+            ,sum(case when trunc(b.dlv_end_dt) > trunc(a.send_af_predtn_end_dt) then 1 else 0 end) as late
+        from tmall.tr_dlv_predtn_info a,
+            (select dlv_no, dlv_end_dt from STTMALL.ST_ORD_PRD_DLV_SUM
+                where 1=1
+                    and DLV_END_DT >= next_day(trunc(sysdate), 2) + #{addWeekVal}*7-7
+                    and DLV_END_DT <= next_day(trunc(sysdate), 1) + #{addWeekVal}*7
+            ) b
+        where 1=1
+            and a.dlv_no = b.dlv_no
+            and a.send_af_predtn_rlablty_nval >= 80
+        )
+        select
+            to_char(next_day(trunc(sysdate), 2) + #{addWeekVal}*7-7, 'YYYY-MM-DD') as fromdate
+            ,to_char(next_day(trunc(sysdate), 1) + #{addWeekVal}*7, 'YYYY-MM-DD') as todate
+            ,total
+            ,predictable
+            ,early
+            ,exact
+            ,late
+            ,predictable/total*100 as coverage
+            ,precision
+        from(
+        select
+            early
+            ,exact
+            ,late
+            ,early+exact+late as predictable
+            ,(select count(distinct dlv_no) from STTMALL.ST_ORD_PRD_DLV_SUM
+                where 1=1
+                    and DLV_END_DT >= next_day(trunc(sysdate), 2) + #{addWeekVal}*7-7
+                    and DLV_END_DT <= next_day(trunc(sysdate), 1) + #{addWeekVal}*7
+              ) as total
+            ,(early+exact)/(early+exact+late)*100 as precision
+        from BASE A
+        )
+        ]]>
+    </select>
+    <select id="selectMy11WeeklyProductCoverage" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.sdc.repository.My11WeeklyProductCoverage">
+        <![CDATA[
+        with BASE as(select /*+ parallel(8) */
+            count(distinct b.prd_no) as prd_pred
+        from tmall.tr_dlv_predtn_info a,
+            (select dlv_no, prd_no, dlv_end_dt from STTMALL.ST_ORD_PRD_DLV_SUM
+                where 1=1
+                    and DLV_END_DT >= next_day(trunc(sysdate), 2) + #{addWeekVal}*7-7
+                    and DLV_END_DT <= next_day(trunc(sysdate), 1) + #{addWeekVal}*7
+            ) b
+        where 1=1
+            and a.dlv_no = b.dlv_no
+            and a.send_af_predtn_rlablty_nval >= 80
+        )
+        select
+            to_char(next_day(trunc(sysdate), 2) + #{addWeekVal}*7-7, 'YYYY-MM-DD') as fromdate
+            ,to_char(next_day(trunc(sysdate), 1) + #{addWeekVal}*7, 'YYYY-MM-DD') as todate
+            ,prd_total as prdTotal
+            ,prd_pred as prdPred
+            ,prd_pred/prd_total*100 as coverage
+        from(
+        select
+            prd_pred
+            ,(select count(distinct prd_no) from STTMALL.ST_ORD_PRD_DLV_SUM
+                where 1=1
+                    and DLV_END_DT >= next_day(trunc(sysdate), 2) + #{addWeekVal}*7-7
+                    and DLV_END_DT <= next_day(trunc(sysdate), 1) + #{addWeekVal}*7
+             ) as prd_total
+        from BASE A
+        )
+        ]]>
+    </select>
+</mapper>

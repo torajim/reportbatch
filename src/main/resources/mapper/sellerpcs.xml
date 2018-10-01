@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.skplanet.dpa.reportbatch.domain.sellerpcs.repository.SellerPcsMapper">
+    <select id="selectDailyStat" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.sellerpcs.repository.DailyStat">
+        <![CDATA[
+        SELECT
+               NVL(COUNT(DISTINCT SELLER_NO),0) AS DAU
+               ,NVL(SUM(VST_PV),0) AS PV
+               ,NVL(ROUND(SUM(VST_PV)/COUNT(DISTINCT SELLER_NO),2),0) AS AVGVF
+               ,NVL(SUM(SORT_CLK),0) AS PRCSORTCLK
+               ,NVL(ROUND(SUM(SORT_CLK)/COUNT(DISTINCT SELLER_NO),2),0) AS AVGSC
+               ,NVL(SUM(CHART_VIEW),0) AS CHARTVIEW
+               ,NVL(ROUND(SUM(CHART_VIEW)/COUNT(DISTINCT SELLER_NO),2),0) AS AVGCV
+               ,NVL(SUM(ALARM_SETUP_CLK),0) ALARMSETUPCLK
+               ,(SELECT NVL(SUM(ALARM_SETUP_CLK),0) FROM HDFSUSER.BASE_SO_SELLERPCS_CLIENT_LOG WHERE PART_DT <= TB.기준일자) ACMALARMSETUPCLK
+               ,NVL(ROUND(SUM(ALARM_SETUP_CLK)/COUNT(DISTINCT SELLER_NO),2),0) AVGALARMSETUPCLK
+               ,NVL(SUM(PRD_ALARM_ON_CLK),0) PRDALARMONCLK
+               ,NVL(SUM(PRD_ALARM_OFF_CLK),0) PRDALARMOFFCLK
+               ,(SELECT NVL(SUM(PRD_ALARM_ON_CLK-PRD_ALARM_OFF_CLK),0) FROM HDFSUSER.BASE_SO_SELLERPCS_CLIENT_LOG WHERE PART_DT <= TB.기준일자) ACMPRDALARMON
+               ,NVL(ROUND(SUM(PRD_ALARM_ON_CLK+PRD_ALARM_OFF_CLK)/COUNT(DISTINCT SELLER_NO),2),0) AVGPRDALARMCLK
+               ,NVL(MAX(TD.MNGR_SEL_CNT),0) MNGRSELCNT
+               ,NVL(MAX(TD.ACM_MNGR_SEL_CNT),0) ACMMNGRSELCNT
+               --,NVL(MAX(TF.DCL_CNT),0) DCL_CNT --당일신고건수
+               --,NVL(MAX(TG.ACM_TRT_CNT),0) ACM_TRT_CNT --누적신고건수
+               --,NVL(MAX(TG.ACM_DCL_CNT),0) ACM_DCL_CNT --누적처리건수
+               --,NVL(ROUND(MAX(TG.ACM_TRT_CNT)/MAX(DECODE(TG.ACM_DCL_CNT,NULL,NULL,TG.ACM_DCL_CNT)),2),0) ACM_TRT_RT --누적처리율
+               ,NVL(SUM(PRD_ADJ_CLK),0) PRDADJCLK --가격변경시도건수
+               ,NVL(SUM(PRD_ADJ_CNFM_CNT),0) PRDADJCNFMCNT  --가격변경성공건수
+               ,NVL(COUNT(DISTINCT DECODE(PRD_ADJ_CNFM_CNT,0,NULL,NULL,NULL,SELLER_NO)),0) PRCADJCNFMSELCNT --가격변경완료셀러수
+               ,NVL(SUM(PRD_ADJ_DSC_AMT),0) PRDADJDSCAMT --가격인하금액
+         FROM  HDFSUSER.BASE_SO_SELLERPCS_CLIENT_LOG TA
+               ,DWUSER.DD_기준일 TB
+               ,(SELECT  TB.기준일자
+                        ,COUNT(DISTINCT SELLER_NO) MNGR_SEL_CNT
+                        ,(SELECT COUNT(DISTINCT SELLER_NO) MNGR_SEL_CNT FROM TMALL.PD_SELLER_PCS_MNGR TB WHERE TO_CHAR(TB.CREATE_DT,'YYYYMMDD') <= TB.기준일자) ACM_MNGR_SEL_CNT
+                  FROM  TMALL.PD_SELLER_PCS_MNGR TA
+                        ,DWUSER.DD_기준일 TB
+                 WHERE  TO_CHAR(CREATE_DT(+),'YYYYMMDD') = TB.기준일자
+                 GROUP BY TB.기준일자) TD
+                --,(--신고하기
+                --SELECT  TO_CHAR(TA.CREATE_DT,'YYYYMMDD') 기준일자
+                --        ,COUNT(DISTINCT TA.DCL_NO) DCL_CNT
+                --  FROM  TMALL.PD_CTLG_DCL@TMALL_LINK TA
+                --        ,TMALL.PD_CTLG_DCL_DTL@TMALL_LINK TB
+                -- WHERE  TA.DCL_NO = TB.DCL_NO
+                --   AND  TB.DCL_TYP_CD IN ('08','09') --08	SO 매칭상품(옵션), 09	SO 최저가
+                --GROUP BY TO_CHAR(TA.CREATE_DT,'YYYYMMDD')
+                --ORDER BY 1 DESC) TF
+               --,(--누적신고,처리건수
+                --SELECT  TCC.기준일자
+                --    ,COUNT(DISTINCT TAA.DCL_NO) ACM_DCL_CNT
+                --    ,COUNT(DISTINCT CASE WHEN TAA.STAT_TYP_CD = '03' THEN TAA.DCL_NO ELSE NULL END) ACM_TRT_CNT
+                --  FROM  TMALL.PD_CTLG_DCL@TMALL_LINK TAA
+                --    ,TMALL.PD_CTLG_DCL_DTL@TMALL_LINK TBB
+                --    ,DWUSER.DD_기준일 TCC
+                -- WHERE  TAA.DCL_NO = TBB.DCL_NO
+                --   AND  TBB.DCL_TYP_CD IN ('08','09') --08	SO 매칭상품(옵션), 09	SO 최저가
+                --   AND  TAA.CREATE_DT <= TCC.기준일시 +0.99999
+                --             AND  TCC.기준일자 BETWEEN '20180701' AND '20180715'
+                -- GROUP BY TCC.기준일자) TG
+        WHERE  TA.PART_DT(+) = TB.기준일자
+          AND  TB.기준일자 = TO_CHAR(SYSDATE+#{addDayVal},'YYYYMMDD')
+          AND  TB.기준일자 = TD.기준일자(+)
+          AND  TA.seller_no <> '10000276' --crewmate 제외 조건 추가
+          --AND  TB.기준일자 = TF.기준일자(+)
+          --AND  TB.기준일자 = TG.기준일자(+)
+        GROUP BY TB.기준일자
+        ]]>
+    </select>
+    <select id="selectMonthlyStat" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.sellerpcs.repository.MonthlyStat">
+        <![CDATA[
+        SELECT
+               TO_CHAR(SYSDATE+#{addDayVal},'YYYYMMDD') AS 기준일자
+              ,NVL(MAX(MAU),0) as mau
+              ,NVL(MAX(TOT_SEL_CNT),0) as totSelCnt
+        FROM
+              (SELECT  COUNT(DISTINCT SELLER_NO) MAU
+                      ,0 AS TOT_SEL_CNT
+                FROM  HDFSUSER.BASE_SO_SELLERPCS_CLIENT_LOG TA
+               WHERE  TA.PART_DT BETWEEN TO_CHAR(ADD_MONTHS(SYSDATE+#{addDayVal},-1),'YYYYMMDD') AND TO_CHAR(SYSDATE+#{addDayVal},'YYYYMMDD')
+              UNION ALL
+              SELECT   /*+ PARALLEL(C 4) PARALLEL(CM 4) PARALLEL(PRD 4) USE_HASH(C CM PRD) +*/
+                      0 AS MAU
+                      ,COUNT(DISTINCT PRD.SEL_MNBD_NO) TOT_SEL_CNT
+                FROM  TMALL.PD_CTLG C
+                      ,TMALL.PD_CTLG_PRD_MATCH CM
+                      ,TMALL.DP_LIVE_PRD PRD
+               WHERE  1=1
+                 AND  C.CTLG_NO = CM.CTLG_NO
+                 AND  C.CTLG_STAT_CD = '103'
+                 AND  C.USE_YN = 'Y'
+                 AND  CM.MATCH_OBJ_NO = PRD.PRD_NO
+                 AND  CM.MATCH_CLF_CD = '01'
+                 AND  CM.USE_YN = 'Y'
+                 AND  PRD.SEL_END_DY >= TRUNC(SYSDATE+#{addDayVal})
+              )TA
+        ]]>
+    </select>
+    <select id="selectChartViewCtlgTop10" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.sellerpcs.repository.ChartViewCtlg">
+        <![CDATA[
+        SELECT  CHART_VIEW_CTLG_NO as chartViewCtlgNo
+                ,DISP_MODEL_NM as dispModelNm
+                ,RANK() OVER( ORDER BY CHART_VIEW DESC) as rnk
+                ,CHART_VIEW as chartView
+          FROM  (SELECT  CHART_VIEW_CTLG_NO
+                        ,SUM(CHART_VIEW) CHART_VIEW
+                  FROM  HDFSUSER.BASE_SO_SELLERPCS_CLIENT_LOG
+                 WHERE  PART_DT = TO_CHAR(SYSDATE+#{addDayVal},'YYYYMMDD')
+                GROUP BY CHART_VIEW_CTLG_NO
+                ORDER BY CHART_VIEW DESC) TA
+                ,TMALL.PD_CTLG TB
+        WHERE ROWNUM <= 10
+          AND TA.CHART_VIEW_CTLG_NO = TB.CTLG_NO
+        ]]>
+    </select>
+    <select id="selectSoMainStat" parameterType="hashmap" resultType="com.skplanet.dpa.reportbatch.domain.sellerpcs.repository.SoMainStat">
+    <![CDATA[
+    SELECT  TB.기준일자 as dateStr
+            ,SUM(CNT) as SoMainPv
+            ,SUM(SEL_CNT1) as SoMainSelCnt
+    FROM  HDFSUSER.BASE_SO_MAIN_LOG TA
+         ,DWUSER.DD_기준일 TB
+    WHERE  TA.PART_DT = TB.기준일자
+        AND  TA.CURR_ACTN_ID = 'iframe_page_show'
+        and ta.PART_DT = to_char(sysdate+#{addDayVal}, 'YYYYMMDD')
+        GROUP BY TB.기준일자
+    ]]>
+    </select>
+</mapper>

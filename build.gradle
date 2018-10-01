@@ -1,0 +1,93 @@
+group 'com.skplanet.dpa'
+version '1.0-SNAPSHOT'
+
+buildscript {
+    ext {
+        springBootVersion = '1.5.10.RELEASE'
+    }
+
+    repositories {
+        mavenCentral()
+        //maven{
+        //    url 'http://mvn.skplanet.com/content/groups/public/'
+        //}
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+        jcenter()
+    }
+    dependencies {
+        classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+        classpath "io.franzbecker:gradle-lombok:1.8"
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'idea'
+apply plugin: 'org.springframework.boot'
+apply plugin: 'checkstyle'
+apply plugin: "io.franzbecker.gradle-lombok"
+apply plugin: 'io.spring.dependency-management'
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+jar {
+    manifest {
+        attributes('Main-Class': 'com.skplanet.dpa.reportbatch.Application')
+    }
+    baseName = 'report-batch'
+    exclude('**/*local*.yml','**/*local*.properties')
+}
+
+repositories {
+    mavenLocal()
+    //maven { url 'http://mvn.skplanet.com/content/groups/public/' }
+    //maven { url "http://11st-lib.skplanet.com:8081/nexus/content/groups/public/" }
+    flatDir(dirs: file('./'))
+    mavenCentral()
+    maven { url "http://maven.jahia.org/maven2/"}
+    maven { url "https://dl.bintray.com/operandoos/maven/"}
+}
+
+dependencies {
+    compile('org.projectlombok:lombok')
+    compile("com.oracle:ojdbc7:12.1.0.2")
+    compile("org.mybatis.spring.boot:mybatis-spring-boot-starter:1.2.0")
+    compile('org.mybatis:mybatis')
+    compile('org.mybatis:mybatis-spring')
+    compile("org.modelmapper.extensions:modelmapper-spring:0.7.5")
+    compile group: 'net.logstash.logback', name: 'logstash-logback-encoder', version: '4.7'
+
+    runtime('org.springframework.boot:spring-boot-devtools')
+    testCompile 'org.assertj:assertj-core:3.6.2'
+    testCompile('org.springframework.boot:spring-boot-starter-test')
+    testCompile group: 'junit', name: 'junit', version: '4.12'
+
+    // https://mvnrepository.com/artifact/org.jasypt/jasypt
+    compile group: 'org.jasypt', name: 'jasypt', version: '1.9.2'
+
+    // https://mvnrepository.com/artifact/org.apache.httpcomponents.client5/httpclient5
+    compile group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.0-alpha2'
+
+    // https://mvnrepository.com/artifact/com.google.code.gson/gson
+    compile group: 'com.google.code.gson', name: 'gson', version: '2.8.5'
+
+    // https://mvnrepository.com/artifact/org.apache.poi/poi
+    compile group: 'org.apache.poi', name: 'poi', version: '3.17'
+
+    // https://mvnrepository.com/artifact/org.apache.poi/poi-ooxml
+    compile group: 'org.apache.poi', name: 'poi-ooxml', version: '3.17'
+
+    compile group: 'com.os.operando.meteoroid', name: 'meteoroid', version: '1.2.0'
+    compile group: 'com.squareup.okhttp3', name: 'okhttp', version: '3.10.0'
+
+    compile ':SplunkSender-1.3-2018.08.08@jar'
+}
+
+checkstyle {
+    toolVersion = '7.5.1'
+    configFile = 'checkstyle.xml' as File
+    sourceSets = [project.sourceSets.main, project.sourceSets.test]
+}

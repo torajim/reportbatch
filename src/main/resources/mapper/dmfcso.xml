@@ -1,0 +1,419 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.skplanet.dpa.reportbatch.domain.dmfc.repository.DmfcSoMapper">
+    <select id="selectMdSoRates" resultType="com.skplanet.dpa.reportbatch.domain.dmfc.repository.MdSoRate">
+        <![CDATA[
+        select a.담당MD명 as mdname
+        , a.판매중 as sellcnt
+        , a.품절 as socnt
+        , case when a.판매중 = 0 then 0 else round(a.품절 / (a.판매중 + a.품절) * 100, 1) end as sorate
+        from (
+        select /*+ ordered */
+        c.emp_nm  as 담당MD명
+        , c.emp_no  as 담당NO
+        , count(distinct case when nvl(d.stck_qty, 0) >  0  then m.stck_no else null end) as 판매중
+        , count(distinct case when nvl(d.stck_qty, 0) <= 0  then m.stck_no else null end) as 품절
+        from  (
+        select /*+ ordered */
+        a.prd_no
+        , c.stck_no
+        , a.emp_no
+        , (
+        /* 영업일 - 5일 전 취급종료 상품이 정상으로 변경된 경우 대상에서 제외 (발주부터 입고까지 lead-time발생) */
+        select /*+ index_desc(m pk_wm_dst_stck_hist) */
+        m.hist_dt
+        from   TMALL.wm_dst_stck_hist m
+        where  m.stck_no = c.stck_no
+        and    nvl(m.dst_stck_stat_cd, '01') in ('01')
+        and    rownum = 1
+        ) as hist_dt_01
+        , (
+        /* 영업일 - 5일 전 취급종료 상품이 정상으로 변경된 경우 대상에서 제외 (발주부터 입고까지 lead-time발생) */
+        select /*+ index_desc(m pk_wm_dst_stck_hist) */
+        m.hist_dt
+        from   TMALL.wm_dst_stck_hist m
+        where  m.stck_no = c.stck_no
+        and    nvl(m.dst_stck_stat_cd, '01') not in ('01')
+        and    rownum = 1
+        ) as hist_dt_02
+        from   TMALL.pd_prd_wms_info a
+        , TMALL.pd_prd          b
+        , TMALL.wm_dst_stck     c
+        where  a.prd_no                      = b.prd_no
+        and    a.prd_no                      = c.prd_no
+        and    b.bsn_deal_clf                = '02'
+        and    nvl(b.set_typ_cd, '01')       = '01'
+        and    b.sel_stat_cd                 in ('103','104')
+        and    nvl(c.dst_stck_stat_cd, '01') in ('01') /* 정상 */
+        and    nvl(a.dst_prd_clf_cd  , '01') not in ('02') /* 사은품 제외 */
+        and    b.prd_nm not like '%QA%'
+        and    b.prd_nm not like '%qa%'
+        and    b.prd_nm not like '%test%'
+        and    b.prd_nm not like '%구매금지%'
+        and    b.prd_nm not like '%리퍼브%'
+        and    a.emp_no not in (7200)
+        ) m
+        , TMALL.wm_pntime_stck b
+        , TMALL.pd_stock d
+        , TMALL.sy_emp  c
+        where  m.stck_no = b.stck_no
+        and    m.stck_no = d.stock_no
+        and    m.emp_no  = c.emp_no (+)
+        and    not( m.hist_dt_02 is not null and
+        nvl(m.hist_dt_01, sysdate) >= to_date(TMALL.fn_sy_calendar('-', '7', to_char(sysdate, 'yyyymmdd'))) )
+        and    b.basi_dt = trunc(sysdate - 1)
+        group by
+        c.emp_nm
+        , c.emp_no
+        ) a
+        where 1=1 order by 1
+        ]]>
+    </select>
+    <select id="selectSoStatusDeliveredBy11st" resultType="com.skplanet.dpa.reportbatch.domain.dmfc.repository.SoStatus">
+        <![CDATA[
+                -- 품절현황 (배송유형 = 11번가배송)
+        select /*+ ordered */
+               m.prd_no   as prdno
+             , m.stck_no  as stckno
+             , m.prd_nm   as prdname
+             , c.emp_nm   as mdname
+             , nvl(f.stck_qty, 0) as stckqty
+             , decode(m.dlv_clf, '01',
+                       nvl ((select /*+ leading(a1 a2) use_nl(a2) index(a1 ix1_wm_ordr_dtl) */
+                                    nvl(sum(ordr_qty), 0) - nvl(sum((select /*+ index(a1 ix1_wm_incm_out) */
+                                                                            sum(a2.incm_out_qty) sum_incm_out_qty
+                                                                     from   wm_incm_out a2
+                                                                     where  a1.ordr_no      = a2.ordr_out_no
+                                                                     and    a1.ordr_dtl_seq = a2.ordr_out_seq
+                                                                     and    a2.center_cd    = b.dst_cntr_cd
+                                                                     and    a2.incm_out_clf = '1'
+                                                                     and    a1.ordr_stat    = '08' )), 0)
+                             from   wm_ordr_dtl a1
+                                  , wm_ordr_mst a2
+                             where  a1.ordr_no   = a2.ordr_no
+                             and    a1.stock_no  = m.stck_no
+                             and    a2.center_cd = b.dst_cntr_cd
+                             and    a1.ordr_stat in ('05','06','08' )), 0), 0) as ordrqty
+             , nvl(f.wait_stck_qty, 0) as waitstckqty
+             , d.wk_sel_qty1 as wkselqty1
+             , d.wk_sel_qty2 as wkselqty2
+             , d.wk_sel_qty4 as wkselqty4
+             ,(select dtls_com_nm from TMALL.sy_co_detail where grp_cd = 'PD014' and dtls_cd = m.sel_stat_cd) as selstat
+             , m.display_yn as displayyn
+             ,(select dtls_com_nm from TMALL.sy_co_detail where grp_cd = 'WM038' and dtls_cd = nvl(m.dst_stck_stat_cd, '01')) as dststckstat
+             ,(select dtls_com_nm from TMALL.sy_co_detail where grp_cd = 'PD090' and dtls_cd = m.dlv_clf) as dlvclf
+             , trunc(sysdate - 1) - nvl((select /*+ index_desc (a1 pk_wm_pntime_stck) */
+                                                trunc(a1.basi_dt)
+                                         from   TMALL.wm_pntime_stck a1
+                                         where  a1.dst_cntr_cd = b.dst_cntr_cd
+                                         and    a1.stck_no     = m.stck_no
+                                         and    a1.basi_dt     < trunc(sysdate - 1)
+                                         and    a1.stck_qty    > 0
+                                         and    rownum = 1), trunc(sysdate - 1) ) as soperiod
+             , e.center_nm as centername
+        from  (
+               select /*+ ordered */
+                      a.prd_no
+                    , c.stck_no
+                    , a.emp_no
+                    , b.prd_nm
+                    , b.sel_stat_cd
+                    , b.dlv_clf
+                    , c.dst_stck_stat_cd
+                    , b.display_yn
+                    , (
+                        /* 영업일 - 5일 전 취급종료 상품이 정상으로 변경된 경우 대상에서 제외 (발주부터 입고까지 lead-time발생) */
+                        select /*+ index_desc(m pk_wm_dst_stck_hist) */
+                               m.hist_dt
+                        from   TMALL.wm_dst_stck_hist m
+                        where  m.stck_no = c.stck_no
+                        and    nvl(m.dst_stck_stat_cd, '01') in ('01')
+                        and    rownum = 1
+                      ) as hist_dt_01
+                    , (
+                        /* 영업일 - 5일 전 취급종료 상품이 정상으로 변경된 경우 대상에서 제외 (발주부터 입고까지 lead-time발생) */
+                        select /*+ index_desc(m pk_wm_dst_stck_hist) */
+                               m.hist_dt
+                        from   TMALL.wm_dst_stck_hist m
+                        where  m.stck_no = c.stck_no
+                        and    nvl(m.dst_stck_stat_cd, '01') not in ('01')
+                        and    rownum = 1
+                      ) as hist_dt_02
+               from   TMALL.pd_prd_wms_info a
+                    , TMALL.pd_prd          b
+                    , TMALL.wm_dst_stck     c
+               where  a.prd_no                      = b.prd_no
+               and    a.prd_no                      = c.prd_no
+               and    b.bsn_deal_clf                = '02'
+               and    b.dlv_clf                     = '01'
+               and    nvl(b.SET_TYP_CD, '01')       = '01'
+               and    b.sel_stat_cd                 in ('103','104')
+               and    nvl(c.dst_stck_stat_cd, '01') in ('01') /* 정상 */
+               and    nvl(a.dst_prd_clf_cd  , '01') not in ('02') /* 사은품 제외 */
+               and    b.prd_nm not like '%QA%'
+               and    b.prd_nm not like '%qa%'
+               and    b.prd_nm not like '%test%'
+               and    b.prd_nm not like '%구매금지%'
+               and    b.prd_nm not like '%리퍼브%'
+               and    a.emp_no not in (7200)
+             ) m
+             , TMALL.wm_pntime_stck  b
+             , TMALL.pd_stock_center f
+             , TMALL.sy_emp          c
+             , wm_center       e
+             , st_dmfc_dd_stck d
+        where  m.stck_no        = b.stck_no
+        and    b.dst_cntr_cd    = e.center_cd
+        and    m.emp_no         = c.emp_no (+)
+        and    b.stck_no        = f.stock_no (+)
+        and    b.dst_cntr_cd    = f.center_cd (+)
+        and    b.stck_no        = d.stck_no (+)
+        and    b.dst_cntr_cd    = d.center_cd (+)
+        and    f.stck_qty       <= 0
+        and    d.basi_dt (+)    = trunc(sysdate)
+        and    not( m.hist_dt_02 is not null and
+                    nvl(m.hist_dt_01, sysdate) >= to_date(TMALL.fn_sy_calendar('-', '7', to_char(sysdate, 'yyyymmdd'))) )
+        and    b.basi_dt        = trunc(sysdate - 1)
+        and    1=1 order by 4,1,2
+        ]]>
+    </select>
+    <select id="selectSoStatusDeliveredBySeller" resultType="com.skplanet.dpa.reportbatch.domain.dmfc.repository.SoStatus">
+        <![CDATA[
+                -- 품절현황 (배송유형 = 업체배송)
+        select /*+ ordered */
+               m.prd_no   as prdno
+             , m.stck_no  as stckno
+             , m.prd_nm   as prdname
+             , c.emp_nm   as mdname
+             , decode(g.wms_use_clf_cd, '03', nvl(f.stck_qty, 0), nvl(h.stck_qty, 0)) as stckqty
+             , decode(m.dlv_clf, '01',
+                       nvl ((select /*+ leading(a1 a2) use_nl(a2) index(a1 ix1_wm_ordr_dtl) */
+                                    nvl(sum(ordr_qty), 0) - nvl(sum((select /*+ index(a1 ix1_wm_incm_out) */
+                                                                            sum(a2.incm_out_qty) sum_incm_out_qty
+                                                                     from   wm_incm_out a2
+                                                                     where  a1.ordr_no      = a2.ordr_out_no
+                                                                     and    a1.ordr_dtl_seq = a2.ordr_out_seq
+                                                                     and    a2.center_cd    = b.dst_cntr_cd
+                                                                     and    a2.incm_out_clf = '1'
+                                                                     and    a1.ordr_stat    = '08' )), 0)
+                             from   wm_ordr_dtl a1
+                                  , wm_ordr_mst a2
+                             where  a1.ordr_no   = a2.ordr_no
+                             and    a1.stock_no  = m.stck_no
+                             and    a2.center_cd = b.dst_cntr_cd
+                             and    a1.ordr_stat in ('05','06','08' )), 0), 0) as ordrqty
+             , decode(g.wms_use_clf_cd, '03', nvl(f.wait_stck_qty, 0), 0) as waitstckqty
+             , d.wk_sel_qty1 as wkselqty1
+             , d.wk_sel_qty2 as wkselqty2
+             , d.wk_sel_qty4 as wkselqty4
+             ,(select dtls_com_nm from TMALL.sy_co_detail where grp_cd = 'PD014' and dtls_cd = m.sel_stat_cd) as selstat
+             , m.display_yn as displayyn
+             ,(select dtls_com_nm from TMALL.sy_co_detail where grp_cd = 'WM038' and dtls_cd = nvl(m.dst_stck_stat_cd, '01')) as dststckstat
+             ,(select dtls_com_nm from TMALL.sy_co_detail where grp_cd = 'PD090' and dtls_cd = m.dlv_clf) as dlvclf
+             , trunc(sysdate - 1) - nvl((select /*+ index_desc (a1 pk_wm_pntime_stck) */
+                                                trunc(a1.basi_dt)
+                                         from   TMALL.wm_pntime_stck a1
+                                         where  a1.dst_cntr_cd = b.dst_cntr_cd
+                                         and    a1.stck_no     = m.stck_no
+                                         and    a1.basi_dt     < trunc(sysdate - 1)
+                                         and    a1.stck_qty    > 0
+                                         and    rownum = 1), trunc(sysdate - 1) ) as soperiod
+             , e.center_nm as centername
+        from  (
+               select /*+ ordered */
+                      a.prd_no
+                    , c.stck_no
+                    , a.emp_no
+                    , b.prd_nm
+                    , b.sel_stat_cd
+                    , b.dlv_clf
+                    , c.dst_stck_stat_cd
+                    , b.display_yn
+                    , b.sel_mnbd_no
+                    , (
+                        /* 영업일 - 5일 전 취급종료 상품이 정상으로 변경된 경우 대상에서 제외 (발주부터 입고까지 lead-time발생) */
+                        select /*+ index_desc(m pk_wm_dst_stck_hist) */
+                               m.hist_dt
+                        from   TMALL.wm_dst_stck_hist m
+                        where  m.stck_no = c.stck_no
+                        and    nvl(m.dst_stck_stat_cd, '01') in ('01')
+                        and    rownum = 1
+                      ) as hist_dt_01
+                    , (
+                        /* 영업일 - 5일 전 취급종료 상품이 정상으로 변경된 경우 대상에서 제외 (발주부터 입고까지 lead-time발생) */
+                        select /*+ index_desc(m pk_wm_dst_stck_hist) */
+                               m.hist_dt
+                        from   TMALL.wm_dst_stck_hist m
+                        where  m.stck_no = c.stck_no
+                        and    nvl(m.dst_stck_stat_cd, '01') not in ('01')
+                        and    rownum = 1
+                      ) as hist_dt_02
+               from   TMALL.pd_prd_wms_info a
+                    , TMALL.pd_prd          b
+                    , TMALL.wm_dst_stck     c
+                    , pd_stock        e
+               where  a.prd_no                      = b.prd_no
+               and    a.prd_no                      = c.prd_no
+               and    c.stck_no                     = e.stock_no
+               and    b.bsn_deal_clf                = '02'
+               and    b.dlv_clf                     = '02'
+               and    nvl(b.SET_TYP_CD, '01')       = '01'
+               and    e.stck_qty                    <= 0
+               and    b.sel_stat_cd                 in ('103','104')
+               and    nvl(c.dst_stck_stat_cd, '01') in ('01') /* 정상 */
+               and    nvl(a.dst_prd_clf_cd  , '01') not in ('02') /* 사은품 제외 */
+               and    b.prd_nm not like '%QA%'
+               and    b.prd_nm not like '%qa%'
+               and    b.prd_nm not like '%test%'
+               and    b.prd_nm not like '%구매금지%'
+               and    b.prd_nm not like '%리퍼브%'
+               and    a.emp_no not in (7200)
+             ) m
+             , TMALL.wm_pntime_stck  b
+             , TMALL.pd_stock_center f
+             , TMALL.sy_emp          c
+             , wm_center       e
+             , st_dmfc_dd_stck d
+             , mb_mem          g
+             , pd_stock        h
+        where  m.stck_no        = b.stck_no
+        and    m.stck_no        = h.stock_no
+        and    b.dst_cntr_cd    = e.center_cd
+        and    m.sel_mnbd_no    = g.mem_no
+        and    m.emp_no         = c.emp_no (+)
+        and    b.stck_no        = f.stock_no (+)
+        and    b.dst_cntr_cd    = f.center_cd (+)
+        and    b.stck_no        = d.stck_no (+)
+        and    b.dst_cntr_cd    = d.center_cd (+)
+        and    d.basi_dt (+)    = trunc(sysdate)
+        and    not( m.hist_dt_02 is not null and
+                    nvl(m.hist_dt_01, sysdate) >= to_date(TMALL.fn_sy_calendar('-', '7', to_char(sysdate, 'yyyymmdd'))) )
+        and    b.basi_dt        = trunc(sysdate - 1)
+        and    1=1 order by 4,1,2
+        ]]>
+    </select>
+    <select id="selectSoPredictions" resultType="com.skplanet.dpa.reportbatch.domain.dmfc.repository.SoPrediction">
+        <![CDATA[
+                SELECT /*+ PARALLEL(8) */
+            A.PRD_NO AS prdno,
+            A.STCK_NO AS stckno,
+            B.PRD_NM AS prdname,
+            EMP_NM AS mdname,
+            STCK_QTY AS stckqty,
+            ORDR_QTY AS ordrqty,
+            WAIT_STCK_QTY AS waitstckqty,
+            STCK_QTY + ORDR_QTY + WAIT_STCK_QTY AS totalstckqty,
+            PREDTN_QTY AS wkpreqty,
+            WK_SEL_QTY1 AS wkselqty1,
+            WK_SEL_QTY2 AS wkselqty2,
+            WK_SEL_QTY4 AS wkselqty4
+            , (CASE WHEN A.SEL_STAT_CD = '103' THEN '판매중' WHEN A.SEL_STAT_CD = '104' THEN '품절' END) AS selstat
+            , (CASE WHEN DST_STCK_STAT_CD = '01' THEN '정상' END) AS dststckstat
+            , (CASE WHEN DLV_CLF = '01' THEN '11번가배송' WHEN DLV_CLF = '02' THEN '업체배송' END) AS dlvclf
+        FROM (
+            SELECT
+                EMP.EMP_NO,
+                EMP.EMP_NM,
+                B.PRD_NO, A.STCK_NO, A.CENTER_CD,
+                B.STCK_QTY, B.WAIT_STCK_QTY, NVL(ORDR_QTY, 0) AS ORDR_QTY,
+                ROUND(A.SUM_QTY) AS PREDTN_QTY,
+                ORDR_STAT,
+                F.WK_SEL_QTY1, F.WK_SEL_QTY2, F.WK_SEL_QTY4, WK_PREDTN_EROR_NVAL,
+                E2.SEL_STAT_CD, E2.DLV_CLF, DST_STCK_STAT_CD
+            FROM (
+                SELECT STCK_NO, CENTER_CD, SUM(PREDTN_QTY) AS SUM_QTY FROM STTMALL.ST_DMFC_ALG_DD_STATS
+                WHERE BASI_DT = TO_DATE(SYSDATE)
+                    AND PREDTN_OBJ_DT BETWEEN TO_DATE(SYSDATE) AND TO_DATE(SYSDATE) + 6
+                GROUP BY STCK_NO, CENTER_CD
+                HAVING SUM(PREDTN_QTY) >= 3
+            ) A JOIN (
+                SELECT STOCK_NO, CENTER_CD, PRD_NO
+                , STCK_QTY, WAIT_STCK_QTY
+                FROM TMALL.PD_STOCK_CENTER
+            ) B ON (A.STCK_NO = B.STOCK_NO AND A.CENTER_CD = B.CENTER_CD)
+            JOIN TMALL.WM_DST_STCK D ON (A.STCK_NO = D.STCK_NO)
+            JOIN TMALL.PD_PRD_WMS_INFO E ON (D.PRD_NO = E.PRD_NO)
+            JOIN TMALL.PD_PRD E2 ON (D.PRD_NO = E2.PRD_NO)
+            JOIN (SELECT * FROM STTMALL.ST_DMFC_DD_STCK WHERE BASI_DT = TO_DATE(SYSDATE)) F ON (A.STCK_NO = F.STCK_NO)
+            LEFT OUTER JOIN TMALL.SY_EMP EMP ON (E.EMP_NO = EMP.EMP_NO)
+            LEFT OUTER JOIN (
+                SELECT STOCK_NO, PRD_NO, EMP_NO, INCM_PLN_DT, ORDR_QTY, ORDR_STAT FROM TMALL.WM_ORDR_DTL
+                WHERE INCM_PLN_DT >= TO_DATE(SYSDATE) AND ORDR_STAT IN ('01', '03', '04', '05', '06', '08', '09')
+            ) C ON (A.STCK_NO = C.STOCK_NO)
+            WHERE 1=1
+                AND SUM_QTY >= (STCK_QTY + WAIT_STCK_QTY + NVL(ORDR_QTY, 0)) / 0.95
+                AND DST_STCK_STAT_CD = '01'
+                AND (DST_PRD_CLF_CD != '02' OR DST_PRD_CLF_CD IS NULL)
+                AND F.WK_SEL_QTY1 > 0 AND F.WK_SEL_QTY2 > 0
+                AND E2.PRD_NO NOT IN (SELECT DISTINCT MST_PRD_NO FROM TMALL.PD_STOCK_SET_INFO)
+                AND WK_SEL_QTY1 * 0.7 >= WK_PREDTN_EROR_NVAL
+                AND E2.PRD_NM IS NOT NULL AND LENGTH(TRIM(E2.PRD_NM)) > 0
+                AND INSTR(E2.PRD_NM, '[QA') = 0 AND INSTR(E2.PRD_NM, 'QA_') = 0 AND INSTR(E2.PRD_NM, '구매금지') = 0 AND INSTR(E2.PRD_NM, 'QA김용섭') = 0
+                AND E2.BSN_DEAL_CLF NOT IN ('01', '04') -- CODE : MB066
+                AND E2.SEL_STAT_CD IN ('103', '104')
+        ) A JOIN TMALL.DP_LIVE_PRD B ON (A.PRD_NO = B.PRD_NO)
+        ORDER BY EMP_NO, STCK_QTY + WAIT_STCK_QTY + ORDR_QTY - PREDTN_QTY, STCK_QTY + WAIT_STCK_QTY + ORDR_QTY
+        ]]>
+    </select>
+    <select id="selectMdProducts" resultType="com.skplanet.dpa.reportbatch.domain.dmfc.repository.MdProduct">
+        <![CDATA[
+                -- 담당MD별_관리상품
+        select /*+ ordered */
+               distinct
+               c.emp_nm   as mdname
+             , m.prd_no   as prdno
+             , m.prd_nm   as prdname
+        from  (
+               select /*+ ordered */
+                      a.prd_no
+                    , a.emp_no
+                    , b.prd_nm
+                    , c.stck_no
+                    , (
+                        /* 영업일 - 5일 전 취급종료 상품이 정상으로 변경된 경우 대상에서 제외 (발주부터 입고까지 lead-time발생) */
+                        select /*+ index_desc(m pk_wm_dst_stck_hist) */
+                               m.hist_dt
+                        from   TMALL.wm_dst_stck_hist m
+                        where  m.stck_no = c.stck_no
+                        and    nvl(m.dst_stck_stat_cd, '01') in ('01')
+                        and    rownum = 1
+                      ) as hist_dt_01
+                    , (
+                        /* 영업일 - 5일 전 취급종료 상품이 정상으로 변경된 경우 대상에서 제외 (발주부터 입고까지 lead-time발생) */
+                        select /*+ index_desc(m pk_wm_dst_stck_hist) */
+                               m.hist_dt
+                        from   TMALL.wm_dst_stck_hist m
+                        where  m.stck_no = c.stck_no
+                        and    nvl(m.dst_stck_stat_cd, '01') not in ('01')
+                        and    rownum = 1
+                      ) as hist_dt_02
+               from   TMALL.pd_prd_wms_info a
+                    , TMALL.pd_prd          b
+                    , TMALL.wm_dst_stck     c
+               where  a.prd_no                      = b.prd_no
+               and    a.prd_no                      = c.prd_no
+               and    b.bsn_deal_clf                = '02'
+               and    nvl(b.SET_TYP_CD, '01')       = '01'
+               and    b.sel_stat_cd                 in ('103','104')
+               and    nvl(c.dst_stck_stat_cd, '01') in ('01') /* 정상 */
+               and    nvl(a.dst_prd_clf_cd  , '01') not in ('02') /* 사은품 제외 */
+               and    b.prd_nm not like '%QA%'
+               and    b.prd_nm not like '%qa%'
+               and    b.prd_nm not like '%test%'
+               and    b.prd_nm not like '%구매금지%'
+               and    b.prd_nm not like '%리퍼브%'
+               and    a.emp_no not in (7200)
+             ) m
+             , TMALL.wm_pntime_stck  b
+             , TMALL.sy_emp          c
+        where  m.emp_no         = c.emp_no (+)
+        and    m.stck_no        = b.stck_no
+        and    b.basi_dt        = trunc(sysdate - 1)
+        and    not( m.hist_dt_02 is not null and
+                    nvl(m.hist_dt_01, sysdate) >= to_date(TMALL.fn_sy_calendar('-', '7', to_char(sysdate, 'yyyymmdd'))) )
+        and    1=1 order by 1,2
+        ]]>
+    </select>
+</mapper>
